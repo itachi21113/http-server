@@ -1,6 +1,5 @@
-
 package org.programming.utkarsh;
-import java.io.*; // Import everything for File handling
+import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 
@@ -14,68 +13,36 @@ public class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
-            // 1. Prepare Input/Output
-            InputStream input = client.getInputStream();
-            OutputStream output = client.getOutputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+            // 1. Setup Input/Output
+            BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream()));
+            ResponseWriter writer = new ResponseWriter(client.getOutputStream());
 
-            // 2. Read the Request Line
+            // 2. Read Request
             String requestLine = reader.readLine();
-            if (requestLine == null) return; // Handle empty requests
+            if (requestLine == null) return;
 
-            System.out.println("Thread " + Thread.currentThread().getId() + " requesting: " + requestLine);
+            // USE OUR NEW CLASS: Parse the raw string into an object
+            HTTPRequest request = new HTTPRequest(requestLine);
+            System.out.println("Requested: " + request.getPath());
 
-            // 3. Parse the Request to find the FILE NAME
-            // Request line looks like: "GET /index.html HTTP/1.1"
-            // We split by " " (space) to get the middle part
-            String[] parts = requestLine.split(" ");
-            String path = parts[1];
+            // 3. Handle File Logic
+            String path = request.getPath();
+            if (path.equals("/")) path = "/index.html";
 
-            // Default to index.html if they ask for "/"
-            if (path.equals("/")) {
-                path = "/index.html";
-            }
-
-            // 4. Locate the file on your Hard Drive
-            // "." means "Current Directory"
             File file = new File("." + path);
 
-            // 5. Check if file exists and send response
             if (file.exists() && !file.isDirectory()) {
-                // --- 200 OK (File Found) ---
+                // Success: Delegate to ResponseWriter
+                byte[] content = Files.readAllBytes(file.toPath());
+                String type = guessContentType(path);
 
-                // Read file bytes
-                byte[] fileBytes = Files.readAllBytes(file.toPath());
-
-                // Determine Content-Type (MIME Type)
-                String contentType = guessContentType(path);
-
-                // Send Headers
-                String headers = "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: " + contentType + "\r\n" +
-                        "Content-Length: " + fileBytes.length + "\r\n" +
-                        "\r\n"; // End of headers
-
-                output.write(headers.getBytes());
-                // Send the actual file data
-                output.write(fileBytes);
-
-                System.out.println("Served: " + path);
+                writer.sendSuccess(content, type);
 
             } else {
-                // --- 404 Not Found ---
-                String notFoundMsg = "<h1>404 Not Found</h1><p>The file " + path + " does not exist.</p>";
-                String headers = "HTTP/1.1 404 Not Found\r\n" +
-                        "Content-Type: text/html\r\n" +
-                        "Content-Length: " + notFoundMsg.length() + "\r\n" +
-                        "\r\n";
-
-                output.write(headers.getBytes());
-                output.write(notFoundMsg.getBytes());
-                System.out.println("404 Error: " + path);
+                // Failure: Delegate to ResponseWriter
+                writer.sendNotFound();
             }
 
-            output.flush();
             client.close();
 
         } catch (IOException e) {
@@ -83,12 +50,10 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Helper method to tell the browser what kind of file this is
     private String guessContentType(String path) {
         if (path.endsWith(".html")) return "text/html";
         if (path.endsWith(".css")) return "text/css";
-        if (path.endsWith(".png")) return "image/png";
-        if (path.endsWith(".jpg")) return "image/jpeg";
+        if (path.endsWith(".jpg")) return "image/jpg";
         return "text/plain";
     }
 }
